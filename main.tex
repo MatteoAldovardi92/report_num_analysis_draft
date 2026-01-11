@@ -1,0 +1,3125 @@
+\documentclass[11pt,a4paper]{article}
+
+% ---------- Typography & layout ----------
+\usepackage{tocloft}
+
+\usepackage{titlesec}
+\titlespacing*{\section}{0pt}{1.0ex}{0.6ex}
+\titlespacing*{\subsection}{0pt}{0.8ex}{0.4ex}
+\titlespacing*{\subsubsection}{0pt}{0.6ex}{0.2ex}
+
+% un po' di respiro tra le section principali
+\setlength{\cftbeforesecskip}{0.3em}
+\usepackage{multicol}
+\usepackage{enumitem}
+\usepackage{placeins} 
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage[a4paper,margin=2.6cm]{geometry}
+\usepackage{enumitem}
+\usepackage{graphicx} % Required for inserting images
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{algorithm}    % floating algorithm
+\usepackage{algpseudocode}% pseudocode
+\usepackage{float}          % per [H]
+\usepackage[table]{xcolor}  % \rowcolor
+\usepackage{colortbl}       % \arrayrulecolor
+\usepackage{graphicx}       % \resizebox
+
+\newlength{\savedwidth}
+\newcommand{\thickhline}{%
+  \noalign{\global\savedwidth=\arrayrulewidth}%
+  \noalign{\global\arrayrulewidth=3.5pt}\hline
+  \noalign{\global\arrayrulewidth=\savedwidth}%
+} 
+% table colors
+\usepackage[table]{xcolor}
+% Table grid
+\arrayrulecolor{black!40} % 30% black (light gray)
+
+% Nice headers/footers + links
+\usepackage{fancyhdr}
+\usepackage[hidelinks]{hyperref}
+
+% Paragraph look
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.55em}
+
+\setlength{\abovedisplayskip}{4pt}
+\setlength{\belowdisplayskip}{4pt}
+\setlength{\abovedisplayshortskip}{2pt}
+\setlength{\belowdisplayshortskip}{2pt}
+% --- Bibliography Setup ---
+\usepackage[
+    backend=biber,      % The engine (best for Overleaf)
+    style=numeric,      % Options: numeric, ieee, alphabetic, apa
+    sorting=nyt         % Sort by Name, Year, Title
+]{biblatex}
+
+\addbibresource{references.bib} % Link your file
+
+
+
+% Header/Footer setup
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{Numerical Optimization Report}
+\rhead{A.A. 2025--2026}
+\cfoot{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\title{\textbf{Numerical Optimization for Large Scale Problems Report}}
+\author{%
+Matteo Aldovardi (student ID:\ 360426)\\
+Andrea Nocchiero (student ID:\ 361794)
+}
+
+
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+
+\vspace{0.5em}
+\hrule
+\vspace{1.2em}
+
+\tableofcontents
+\newpage
+
+\section{Introduction}
+\newpage
+\section{Implemented methods}
+Both the implemented methods use a \texttt{switch/case} to handle the three options for derivative evaluation supported:
+\begin{enumerate}[topsep=2pt, itemsep=1pt, parsep=0pt, partopsep=0pt]
+    \item exact gradient and exact Hessian (Mode = exact)
+    \item finite-difference (FD) approximations of both gradient and Hessian (Mode = full fd)
+    \item exact gradient and finite-difference approximation of the Hessian using the gradient (Mode = mixed fd)
+\end{enumerate}
+
+\subsection{Modified Newton method with Backtracking}
+
+The implemented algorithm is a Modified Newton method that applies a Hessian correction to enforce positive definiteness before computing the search direction, thereby ensuring that the resulting direction is a descent direction. Once the direction is obtained, an inexact line search is carried out via backtracking until the Armijo condition is satisfied. 
+
+We now outline the algorithmic steps performed at each iteration and highlight the role of the Hessian modification and the Armijo backtracking line search. 
+
+
+\subsubsection{Hessian computation and symmetrization}
+The outer loop starts by computing the Hessian (or Hessian approximation) at $x_k$, denoted by $H_k \approx \nabla^2 f(x_k)$.
+Since FD-based evaluations may introduce numerical asymmetries, symmetry is enforced by updating
+$H_k \gets \tfrac12\bigl(H_k + H_k^\top\bigr)$.
+
+\subsubsection{Positive definiteness enforcement via Cholesky and diagonal shift}
+Subsequently, $\tau$ is initialized and updated until a Cholesky factorization succeeds. First, $m$ is computed as the minimum diagonal entry of $H_k$, i.e.\ $m \gets \min\!\bigl(\operatorname{diag}(H_k)\bigr)$. If $m>0$ then $\tau \gets 0$, otherwise $\tau \gets \max(0,\beta-m)$. This is done because positive diagonal entries are a necessary condition for positive definiteness, but since it is not a sufficient condition, positive definiteness must be explicitly verified. A failure (reported by the flag output of \texttt{chol}) indicates that the current matrix is not positive definite and must be corrected through a diagonal shift. Hence, a Cholesky factorization is attempted on $H_k+\tau I$ and, if it fails, $\tau$ is increased according to $\tau \gets \max(2\tau,\beta)$ and the factorization is retried. The process continues until Cholesky factorization succeeds, which means $H_k+\tau I$ has been perturbed enough to be positive definite. 
+
+\subsubsection{Search direction and Armijo backtracking}
+Once Cholesky succeeds, the factor $R$ is used to compute the descent direction $p_k$, and backtracking is performed until the Armijo condition is satisfied. 
+
+\subsubsection{Stopping criterion and safeguards}
+The outer loop repeats until the stopping criterion is satisfied or the maximum number of iterations is reached (safeguard). The stopping criterion implemented is $||\nabla f(x_k)||<\texttt{tol}$, where \texttt{tol} is the given tolerance.
+
+\newpage
+
+
+\subsection{Truncated Newton method}
+
+The implemented algorithm is a Truncated Newton (Newton-CG) method. At each outer iteration $k$, the search direction $p_k$ is computed by approximately solving the Newton system $H_k p_k = -g_k$ via the Conjugate Gradient (CG) method. This avoids the explicit computation and factorization of the Hessian, making the method suitable for large-scale problems.
+
+\subsubsection{Inner CG iteration and forcing sequence}
+The inner CG loop is terminated when the residual $r_i = H_k p_i + g_k$ satisfies the condition $\|r_i\| \le \eta_k \|g_k\|$, where the forcing sequence is chosen as $\eta_k = \min(0.5, \sqrt{\|g_k\|})$. This ensures superlinear convergence near the solution.
+
+\subsubsection{Negative curvature handling}
+Since the CG method is designed for positive definite systems, negative curvature in $H_k$ (detected if $d^T H_k d \le 0$ during CG) requires termination of the inner loop. If negative curvature is encountered at the first inner iteration, the steepest descent direction $-g_k$ is used. Otherwise, the direction computed so far is returned.
+
+\subsubsection{Line search}
+After determining the search direction $p_k$, a backtracking line search is performed to satisfy the Armijo condition, ensuring global convergence.
+
+\section{Test problems}
+
+\subsection{Problem 31 Broyden Tridiagonal}
+\input{truncated-newton-part/problem31_results}
+
+% add a reference?
+\subsection{Problem 83 Lukšan and Vlček}
+\input{truncated-newton-part/problem83_results}
+
+\newpage
+
+\section{Finite Differences implementation}
+First and second order finite difference approximations were implemented by exploiting the problem structure and sparsity pattern, in order to reduce computational cost and improve performance. When perturbing a single component, only the locally affected terms are updated.
+\subsection{FD Problem 31}
+\subsubsection{FD Gradient Problem 31}\label{subsubsec:fd-grad-31}
+
+For this specific problem, each residual $f_k$ depends only on $(x_{k-1},x_k,x_{k+1})$. This is directly exploited in the computation of the centered finite differences (preferred over forwards/backward because error is $O(h^2)$ instead of $O(h)$):
+\begin{equation}
+\label{eq:fd-grad-centered}
+    [\nabla F(x)]_i \;\approx\; \frac{F(x+h e_i)-F(x-h e_i)}{2h}
+\end{equation}
+Since perturbing a single component $x_i$ can only affect the residuals $f_{i-1}, f_i, f_{i+1}$, all other terms in the sum defining $F$ remain unchanged and cancel out in the difference $F(x+h e_i)-F(x-h e_i)$. Therefore, defining:
+\begin{equation*}
+S(i):=\{i-1,i,i+1\}\cap\{1,\dots,n\}, 
+\qquad 
+E_{\mathrm{loc}}(x;i):=\frac12\sum_{k\in S(i)} f_k(x)^2,
+\end{equation*}
+we can compute the same centered FD quotient via the local contribution only:
+\begin{equation*}
+[\nabla F(x)]_i \;\approx\;
+\frac{E_{\mathrm{loc}}(x+h e_i;i)-E_{\mathrm{loc}}(x-h e_i;i)}{2h}.
+\end{equation*}
+This drastically reduces the cost to compute FD approximation of the gradient. For example, naive FD implementation for $n=10^3$ requires $2\cdot 10^6$ residual evaluations, while our efficient implementation requires only $5996$ residual evaluations, without sacrificing accuracy.
+
+
+\subsubsection{FD Hessian Problem 31}
+The same locality property can be exploited to approximate the Hessian entries by centered finite differences. For the diagonal terms, we use the standard second-order centered formula:
+\begin{equation}\label{eq:fd-hess-diag}
+H_{ii}(x)=\frac{\partial^2 F(x)}{\partial x_i^2}\;\approx\;
+\frac{F(x+h_i e_i)-2F(x)+F(x-h_i e_i)}{h_i^2}.
+\end{equation}
+Since perturbing $x_i$ affects only the residuals $f_{i-1},f_i,f_{i+1}$, we can replace full evaluations of $F$ with the local energy $E_{\mathrm{loc}}(\cdot;i)$ defined on $S(i)=\{i-1,i,i+1\}\cap\{1,\dots,n\}$, obtaining:
+\begin{equation}\label{eq:fd-hess-diag-loc}
+H_{ii}(x)\;\approx\;
+\frac{E_{\mathrm{loc}}(x+h_i e_i;i)-2E_{\mathrm{loc}}(x;i)+E_{\mathrm{loc}}(x-h_i e_i;i)}{h_i^2}.
+\end{equation}
+
+For off-diagonal entries ($i\neq j$), we approximate mixed second derivatives with the centered cross difference formula:
+\begin{equation}\label{eq:fd-hess-cross}
+{\small
+H_{ij}(x)\approx
+\frac{
+F(x+h_i e_i+h_j e_j)-F(x+h_i e_i-h_j e_j)
+-F(x-h_i e_i+h_j e_j)+F(x-h_i e_i-h_j e_j)
+}{4h_i h_j}.
+}
+\end{equation}
+
+
+
+Due to the problem structure, $H_{ij}$ is nonzero only for $|i-j|\le 2$, hence the Hessian is pentadiagonal. When perturbing $(x_i,x_{i+1})$ only the residuals with indices
+$S(i,i+1)=\{i-1,i,i+1,i+2\}\cap\{1,\dots,n\}$ can change, and when perturbing $(x_i,x_{i+2})$ only
+$S(i,i+2)=\{i-1,i,i+1,i+2,i+3\}\cap\{1,\dots,n\}$ can change. Therefore, each $F(\cdot)$ appearing in the mixed difference formula can be replaced by the corresponding local energy evaluation, leading to an efficient construction of the five relevant diagonals ($0,\pm1,\pm2$) and assembly of the sparse pentadiagonal Hessian in $i$ and $j$ of the second order finite difference $H_{i,j}.$
+
+In terms of residual evaluations, for $n=10^3$ a naive Hessian FD implementation requires $\approx10^7$ residual evaluations, whereas our implementation requires only $\approx4.5\cdot10^4$ residual evaluations, without sacrificing accuracy.
+
+
+\subsection{FD Problem 83}
+\subsubsection{FD Gradient Problem 83}
+As in \eqref{eq:fd-grad-centered}, we approximate each component of the gradient via centered finite differences. Similarly as in problem 31 each residual $f_k$ depends only on $(x_{k-1},x_k,x_{k+1})$, so perturbing $x_i$ affects only $f_{i-1}$,$f_i$ and $f_{i+1}$. Therefore, in the difference
+$F(x+h_i e_i)-F(x-h_i e_i)$ all the terms $f_k(x)^2$ with $k\notin\{i-1,i,i+1\}$ remain unchanged and cancel out. Defining
+\begin{equation*}
+S(i):=\{i-1,i,i+1\}\cap\{1,\dots,n\},
+\qquad
+E_{\mathrm{loc}}(x;i):=\frac12\sum_{k\in S(i)} f_k(x)^2,
+\end{equation*}
+we can compute the same centered FD quotient via the local contribution only:
+\begin{equation*}
+[\nabla F(x)]_i \;\approx\;
+\frac{E_{\mathrm{loc}}(x+h_i e_i;i)-E_{\mathrm{loc}}(x-h_i e_i;i)}{2h_i}.
+\end{equation*}
+Here the residuals $f_k$ are evaluated consistently with the boundary conditions
+$x_0=0$ and $x_{n+1}=1$ (in particular, the last residual includes the constant term $-1$).
+
+In terms of residual evaluations the same computational advantages already discussed at the end of \ref{subsubsec:fd-grad-31} are obtained.
+
+\subsubsection{FD Hessian Problem 83}
+The same locality property can be exploited to approximate the Hessian entries by centered finite differences. For the diagonal terms, we use the standard second-order centered formula \eqref{eq:fd-hess-diag}. Since perturbing $x_i$ affects only the residuals $f_{i-1},f_i,f_{i+1}$, we can replace full evaluations of $F$ with the local energy $E_{\mathrm{loc}}(\cdot;i)$ defined on $S(i)=\{i-1,i,i+1\}\cap\{1,\dots,n\}$, obtaining \eqref{eq:fd-hess-diag-loc}.
+
+For first off-diagonal entries ($j=i+1$), we approximate mixed second derivatives with the centered cross difference formula \eqref{eq:fd-hess-cross}. Here, perturbing $(x_i,x_{i+1})$ affects only the residuals with indices
+$S(i,i+1)=\{i-1,i,i+1,i+2\}\cap\{1,\dots,n\}$, hence each $F(\cdot)$ term in the formula above is replaced by the corresponding local energy evaluation on $S(i,i+1)$.
+
+Due to the problem structure, $H_{ij}$ is nonzero only for $|i-j|\le 2$, hence the Hessian is pentadiagonal. It's important to note that for Problem 83 the second off-diagonal entries ($j=i+2$) are known analytically and are equal to $1$, so they are inserted directly without finite differences. The resulting sparse pentadiagonal Hessian is then assembled by constructing the five relevant diagonals ($0,\pm1,\pm2$) and exploiting symmetry of the formula defining $H_{i,j}$. Boundary conditions $x_0=0$ and $x_{n+1}=1$ are handled consistently in the residual evaluations.
+
+
+\newpage
+\section{Experimental setup}
+We use a common protocol for both test problems and for both solvers (Modified Newton and Truncated Newton).
+
+\paragraph{Dimensions.}
+\[
+n \in \{2,\;10^3,\;10^4,\;10^5\}.
+\]
+
+\paragraph{Seed.}
+All randomized runs are reproducible with
+\[
+\texttt{seed}=\min\{360426,361794\}.
+\]
+
+\paragraph{Initialization.}
+For each dimension $n$, we use as baseline initial guess the point suggested in the reference PDF, denoted by $\bar{x}\in\mathbb{R}^n$.
+In addition, we generate $5$ perturbed starting points by sampling uniformly in the hypercube centered at $\bar{x}$, i.e.
+\[
+x_0 \sim \mathcal{U}\!\Big([\bar{x}_1-1,\bar{x}_1+1]\times\cdots\times[\bar{x}_n-1,\bar{x}_n+1]\Big),
+\]
+so that each component $(x_0)_i$ is drawn independently from $\mathcal{U}\big([\bar{x}_i-1,\bar{x}_i+1]\big)$. 
+
+\paragraph{Derivative regimes and finite differences.}
+We run three derivative settings:
+\begin{itemize}
+  \item \textbf{Exact:} exact gradient and exact Hessian;
+  \item \textbf{Mixed:} exact gradient and FD Hessian 
+  \item \textbf{Full FD:} FD gradient and FD Hessian.
+\end{itemize}
+In the FD-based experiments we test the increments $h=10^{-k}$ with
+\[
+k\in\{4,\;8,\;12\},
+\]
+and we consider both a \emph{constant} step $h$ and a \emph{component-wise} step $h_i$ proportional to the current evaluation point.
+
+\paragraph{Success/failure criteria.}
+A run is successful if the stopping test is met within $k_{\max}$; otherwise it is a failure. For all experiments the stopping criteria is $\|\nabla f(x^k)\|_2<tol$
+
+\paragraph{Logged metrics.}
+For each run we store the final outputs
+\[
+\Big(x_k,\ \|\nabla f(x_k)\|_2,\ \texttt{iters}=k,\ \texttt{btflag},\ p_{\mathrm{exp}},\ t_{\mathrm{run}}\Big),
+\]
+together with the diagnostic sequences
+\[
+\Big(\{x_j\}_{j=0}^{k},\ \{\texttt{bt}_j\}_{j=0}^{k-1},\ \{\texttt{mod}_j\}_{j=0}^{k-1},\ \{\tau_j\}_{j=0}^{k-1}\Big),
+\]
+where $\texttt{bt}_j$ is the number of backtracking reductions, $\texttt{mod}_j$ the number of Hessian modifications, and $\tau_j$ the final damping parameter at iteration $j$.
+\newpage
+\section{Parameter Tuning}
+\renewcommand{\arraystretch}{1.3}
+\begin{table}[H]
+\centering
+\resizebox{\textwidth}{!}{%
+\arrayrulecolor{black!40}
+\begin{tabular}{||c||c|c|c|c|c|c||c||}
+\hline
+\rowcolor{gray!20}
+\multicolumn{8}{||c||}{\textbf{Parameter tuning -- Problem 31 (Modified Newton)}} \\
+\hline
+\rowcolor{gray!20}
+\textbf{Derivatives} & $\mathbf{k_{\max}}$ & $\mathbf{tol}$ &
+$\mathbf{c_1}$ & $\boldsymbol{\rho}$ & $\mathbf{bt_{\max}}$ & $\boldsymbol{\beta}$  \\
+\hline\hline
+Exact   & \texttt{1000} & \texttt{1e-8} & \texttt{1e-4} & \texttt{0.5} & \texttt{100} & \texttt{1e-3}  \\
+\hline
+Mixed   & \texttt{...}  & \texttt{...}  & \texttt{...}  & \texttt{...} & \texttt{...} & \texttt{...}  \\
+\hline
+Full FD & \texttt{...}  & \texttt{...}  & \texttt{...}  & \texttt{...} & \texttt{...} & \texttt{...}  \\
+\hline
+\end{tabular}}
+\end{table}
+
+
+
+\newpage
+\section{Results - Exact derivatives}
+
+\subsection{Problem 31}
+
+\subsubsection{Modified Newton}
+
+\subsubsection*{\textbf{Case} $n=2$}
+\input{tables_mod/Prob31_n2_exact_mod}
+
+\FloatBarrier
+
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob31_n2_exact_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob31_n2_exact_RateOfConv}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob31_n2_exact_mod}
+\end{figure}
+
+\FloatBarrier
+
+\subsubsection*{\textbf{Case} $n>2$}
+
+\input{tables_mod/Prob31_n1000_exact_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n1000_exact_RateOfConv}
+\caption{Problem 31, Modified Newton, exact derivatives ($n=1000$): experimental convergence rate $p_{exp}$ for converged runs.}
+\label{fig:prob31_n1000_exact_mod_rate}
+\end{figure}
+\FloatBarrier
+
+\input{tables_mod/Prob31_n10000_exact_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n10000_exact_RateOfConv}
+\caption{Problem 31, Modified Newton, exact derivatives ($n=10000$): experimental convergence rate $p_{exp}$ for converged runs.}
+\label{fig:prob31_n10000_exact_mod_rate}
+\end{figure}
+\FloatBarrier
+
+\input{tables_mod/Prob31_n100000_exact_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n100000_exact_RateOfConv}
+\caption{Problem 31, Modified Newton, exact derivatives ($n=100000$): experimental convergence rate $p_{exp}$ for converged runs.}
+\label{fig:prob31_n100000_exact_mod_rate}
+\end{figure}
+\FloatBarrier
+
+
+\subsubsection{Truncated Newton}
+
+\subsubsection*{\textbf{Case} $n=2$}
+\input{tables_mod/Prob31_n2_exact_mod}
+
+\FloatBarrier
+
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob31_n2_exact_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob31_n2_exact_RateOfConv}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob31_n2_exact_trunc}
+\end{figure}
+
+\FloatBarrier
+
+\subsubsection*{\textbf{Case} $n>2$}
+
+\input{tables_mod/Prob31_n1000_exact_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n1000_exact_RateOfConv}
+\caption{Problem 31, Truncated Newton, exact derivatives ($n=1000$): experimental convergence rate $p_{exp}$ for converged runs.}
+\label{fig:prob31_n1000_exact_trunc_rate}
+\end{figure}
+\FloatBarrier
+
+\input{tables_mod/Prob31_n10000_exact_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n10000_exact_RateOfConv}
+\caption{Problem 31, Truncated Newton, exact derivatives ($n=10000$): experimental convergence rate $p_{exp}$ for converged runs.}
+\label{fig:prob31_n10000_exact_trunc_rate}
+\end{figure}
+\FloatBarrier
+
+\input{tables_mod/Prob31_n100000_exact_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n100000_exact_RateOfConv}
+\caption{Problem 31, Truncated Newton, exact derivatives ($n=100000$): experimental convergence rate $p_{exp}$ for converged runs.}
+\label{fig:prob31_n100000_exact_trunc_rate}
+\end{figure}
+\FloatBarrier
+
+\subsection{Problem 83}
+
+\subsubsection{Modified Newton}
+
+\subsubsection*{\textbf{Case} $n=2$}
+\input{tables_mod/Prob83_n2_exact_mod}
+
+\FloatBarrier
+
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob83_n2_exact_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob83_n2_exact_RateOfConv}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob83_n2_exact_mod}
+\end{figure}
+
+\FloatBarrier
+
+\subsubsection*{\textbf{Case} $n>2$}
+
+\input{tables_mod/Prob83_n1000_exact_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob83_n1000_exact_RateOfConv}
+\caption{Problem 83, Modified Newton, exact derivatives ($n=1000$): experimental convergence rate $p_{exp}$ for converged runs.}
+\label{fig:prob83_n1000_exact_mod_rate}
+\end{figure}
+\FloatBarrier
+
+\input{tables_mod/Prob83_n10000_exact_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob83_n10000_exact_RateOfConv}
+\caption{Problem 83, Modified Newton, exact derivatives ($n=10000$): experimental convergence rate $p_{exp}$ for converged runs.}
+\label{fig:prob83_n10000_exact_mod_rate}
+\end{figure}
+\FloatBarrier
+
+\input{tables_mod/Prob83_n100000_exact_mod}
+
+%no rate fig beacuse nothng converged
+
+\subsubsection{Truncated Newton}
+
+\subsubsection*{\textbf{Case} $n=2$}
+\input{tables_mod/Prob83_n2_exact_mod}
+
+\FloatBarrier
+
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob83_n2_exact_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob83_n2_exact_RateOfConv}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob83_n2_exact_trunc}
+\end{figure}
+
+\FloatBarrier
+
+\subsubsection*{\textbf{Case} $n>2$}
+
+\input{tables_mod/Prob83_n1000_exact_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob83_n1000_exact_RateOfConv}
+\caption{Problem 83, Truncated Newton, exact derivatives ($n=1000$): experimental convergence rate $p_{exp}$ for converged runs.}
+\label{fig:prob83_n1000_exact_trunc_rate}
+\end{figure}
+\FloatBarrier
+
+\input{tables_mod/Prob83_n10000_exact_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob83_n10000_exact_RateOfConv}
+\caption{Problem 83, Truncated Newton, exact derivatives ($n=10000$): experimental convergence rate $p_{exp}$ for converged runs.}
+\label{fig:prob83_n10000_exact_trunc_rate}
+\end{figure}
+\FloatBarrier
+
+\input{tables_mod/Prob83_n100000_exact_mod}
+
+%no rate fig beacuse nothng converged
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+\newpage
+\section{Results - Mixed (constant $h$)}
+
+% =========================================================
+% Problem 31
+% =========================================================
+\subsection{Problem 31}
+
+% -------------------------
+% Modified Newton
+% -------------------------
+\subsubsection{Modified Newton}
+
+% =========================================================
+% k = 4
+% =========================================================
+\subsubsection*{\textbf{Mixed FD (constant $h$), $k=4$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_mod/Prob31_n2_mixedfd_const_k4_mod.tex}{
+\input{tables_mod/Prob31_n2_mixedfd_const_k4_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob31_n2_mixed_fd_kG4_kH2_k4_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob31_n2_mixed_fd_k4_RateOfConv}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob31_n2_mixed_mod_const_k4}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- N > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_mod/Prob31_n1000_mixedfd_const_k4_mod.tex}{
+\input{tables_mod/Prob31_n1000_mixedfd_const_k4_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n1000_mixed_fd_k4_RateOfConv}
+\caption{Problem 31, Modified Newton, mixed FD (constant $h$, $k=4$): experimental convergence rate $p_{exp}$ for converged runs ($n=1000$).}
+\label{fig:prob31_n1000_mixed_mod_const_k4_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_mod/Prob31_n10000_mixedfd_const_k4_mod.tex}{
+\input{tables_mod/Prob31_n10000_mixedfd_const_k4_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n10000_mixed_fd_k4_RateOfConv}
+\caption{Problem 31, Modified Newton, mixed FD (constant $h$, $k=4$): experimental convergence rate $p_{exp}$ for converged runs ($n=10000$).}
+\label{fig:prob31_n10000_mixed_mod_const_k4_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_mod/Prob31_n100000_mixedfd_const_k4_mod.tex}{
+\input{tables_mod/Prob31_n100000_mixedfd_const_k4_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n100000_mixed_fd_k4_RateOfConv}
+\caption{Problem 31, Modified Newton, mixed FD (constant $h$, $k=4$): experimental convergence rate $p_{exp}$ for converged runs ($n=100000$).}
+\label{fig:prob31_n100000_mixed_const_k4_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+
+% =========================================================
+% k = 8
+% =========================================================
+\subsubsection*{\textbf{Mixed FD (constant $h$), $k=8$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_mod/Prob31_n2_mixedfd_const_k8_mod.tex}{
+\input{tables_mod/Prob31_n2_mixedfd_const_k8_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob31_n2_mixed_fd_kG8_kH4_k8_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob31_n2_mixed_fd_k8_RateOfConv.png}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob31_n2_mixed_mod_const_k8}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- N > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_mod/Prob31_n1000_mixedfd_const_k8_mod.tex}{
+\input{tables_mod/Prob31_n1000_mixedfd_const_k8_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n1000_mixed_fd_k8_RateOfConv.png}
+\caption{Problem 31, Modified Newton, mixed FD (constant $h$, $k=8$): experimental convergence rate $p_{exp}$ for converged runs ($n=1000$).}
+\label{fig:prob31_n1000_mixed_mod_const_k8_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_mod/Prob31_n10000_mixedfd_const_k8_mod.tex}{
+\input{tables_mod/Prob31_n10000_mixedfd_const_k8_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n10000_mixed_fd_k8_RateOfConv.png}
+\caption{Problem 31, Modified Newton, mixed FD (constant $h$, $k=8$): experimental convergence rate $p_{exp}$ for converged runs ($n=10000$).}
+\label{fig:prob31_n10000_mixed_mod_const_k8_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_mod/Prob31_n100000_mixedfd_const_k8_mod.tex}{
+\input{tables_mod/Prob31_n100000_mixedfd_const_k8_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n100000_mixed_fd_k8_RateOfConv.png}
+\caption{Problem 31, Modified Newton, mixed FD (constant $h$, $k=8$): experimental convergence rate $p_{exp}$ for converged runs ($n=100000$).}
+\label{fig:prob31_n100000_mixed_mod_k8_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+
+% =========================================================
+% k = 12
+% =========================================================
+\subsubsection*{\textbf{Mixed FD (constant $h$), $k=12$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_mod/Prob31_n2_mixedfd_const_k12_mod.tex}{
+\input{tables_mod/Prob31_n2_mixedfd_const_k12_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob31_n2_mixed_fd_kG12_kH6_k12_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob31_n2_mixed_fd_k12_RateOfConv}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob31_n2_mixed_mod_const_k12}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- N > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_mod/Prob31_n1000_mixedfd_const_k12_mod.tex}{
+\input{tables_mod/Prob31_n1000_mixedfd_const_k12_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n1000_mixed_fd_k12_RateOfConv}
+\caption{Problem 31, Modified Newton, mixed FD (constant $h$, $k=12$): experimental convergence rate $p_{exp}$ for converged runs ($n=1000$).}
+\label{fig:prob31_n1000_mixed_mod_const_k12_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_mod/Prob31_n10000_mixedfd_const_k12_mod.tex}{
+\input{tables_mod/Prob31_n10000_mixedfd_const_k12_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n10000_mixed_fd_k12_RateOfConv}
+\caption{Problem 31, Modified Newton, mixed FD (constant $h$, $k=12$): experimental convergence rate $p_{exp}$ for converged runs ($n=10000$).}
+\label{fig:prob31_n10000_mixed_mod_const_k12_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_mod/Prob31_n100000_mixedfd_const_k12_mod.tex}{
+\input{tables_mod/Prob31_n100000_mixedfd_const_k12_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n100000_mixed_fd_k12_RateOfConv}
+\caption{Problem 31, Modified Newton, mixed FD (constant $h$, $k=12$): experimental convergence rate $p_{exp}$ for converged runs ($n=100000$).}
+\label{fig:Prob31_n100000_mixed_mod_const_k12_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+
+
+\subsubsection{Truncated Newton}
+
+% =========================================================
+% k = 4
+% =========================================================
+\subsubsection*{\textbf{Mixed FD (constant $h$), $k=4$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_mod/Prob31_n2_mixedfd_const_k4_mod.tex}{
+\input{tables_mod/Prob31_n2_mixedfd_const_k4_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob31_n2_mixed_fd_kG4_kH2_k4_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob31_n2_mixed_fd_k4_RateOfConv}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob31_n2_mixed_trunc_const_k4}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- N > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_mod/Prob31_n1000_mixedfd_const_k4_mod.tex}{
+\input{tables_mod/Prob31_n1000_mixedfd_const_k4_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n1000_mixed_fd_k4_RateOfConv}
+\caption{Problem 31, Truncated Newton, mixed FD (constant $h$, $k=4$): experimental convergence rate $p_{exp}$ for converged runs ($n=1000$).}
+\label{fig:prob31_n1000_mixed_trunc_const_k4_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_mod/Prob31_n10000_mixedfd_const_k4_mod.tex}{
+\input{tables_mod/Prob31_n10000_mixedfd_const_k4_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n10000_mixed_fd_k4_RateOfConv}
+\caption{Problem 31, Truncated Newton, mixed FD (constant $h$, $k=4$): experimental convergence rate $p_{exp}$ for converged runs ($n=10000$).}
+\label{fig:prob31_n10000_mixed_trunc_const_k4_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_mod/Prob31_n100000_mixedfd_const_k4_mod.tex}{
+\input{tables_mod/Prob31_n100000_mixedfd_const_k4_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n100000_mixed_fd_k4_RateOfConv}
+\caption{Problem 31, Truncated Newton, mixed FD (constant $h$, $k=4$): experimental convergence rate $p_{exp}$ for converged runs ($n=100000$).}
+\label{fig:prob31_n100000_mixed_trunc_const_k4_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+% =========================================================
+% k = 8
+% =========================================================
+\subsubsection*{\textbf{Mixed FD (constant $h$), $k=8$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_mod/Prob31_n2_mixedfd_const_k8_mod.tex}{
+\input{tables_mod/Prob31_n2_mixedfd_const_k8_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob31_n2_mixed_fd_kG8_kH4_k8_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob31_n2_mixed_fd_k8_RateOfConv.png}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob31_n2_mixed_trunc_const_k8}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- N > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_mod/Prob31_n1000_mixedfd_const_k8_mod.tex}{
+\input{tables_mod/Prob31_n1000_mixedfd_const_k8_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n1000_mixed_fd_k8_RateOfConv.png}
+\caption{Problem 31, Truncated Newton, mixed FD (constant $h$, $k=8$): experimental convergence rate $p_{exp}$ for converged runs ($n=1000$).}
+\label{fig:prob31_n1000_mixed_trunc_const_k8_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_mod/Prob31_n10000_mixedfd_const_k8_mod.tex}{
+\input{tables_mod/Prob31_n10000_mixedfd_const_k8_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n10000_mixed_fd_k8_RateOfConv.png}
+\caption{Problem 31, Truncated Newton, mixed FD (constant $h$, $k=8$): experimental convergence rate $p_{exp}$ for converged runs ($n=10000$).}
+\label{fig:prob31_n10000_mixed_trunc_const_k8_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_mod/Prob31_n100000_mixedfd_const_k8_mod.tex}{
+\input{tables_mod/Prob31_n100000_mixedfd_const_k8_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n100000_mixed_fd_k8_RateOfConv.png}
+\caption{Problem 31, Truncated Newton, mixed FD (constant $h$, $k=8$): experimental convergence rate $p_{exp}$ for converged runs ($n=100000$).}
+\label{fig:prob31_n100000_mixed_trunc_const_k8_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+% =========================================================
+% k = 12
+% =========================================================
+\subsubsection*{\textbf{Mixed FD (constant $h$), $k=12$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_mod/Prob31_n2_mixedfd_const_k12_mod.tex}{
+\input{tables_mod/Prob31_n2_mixedfd_const_k12_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob31_n2_mixed_fd_kG12_kH6_k12_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob31_n2_mixed_fd_k12_RateOfConv}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob31_n2_mixed_trunc_const_k12}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- N > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_mod/Prob31_n1000_mixedfd_const_k12_mod.tex}{
+\input{tables_mod/Prob31_n1000_mixedfd_const_k12_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n1000_mixed_fd_k12_RateOfConv}
+\caption{Problem 31, Truncated Newton, mixed FD (constant $h$, $k=12$): experimental convergence rate $p_{exp}$ for converged runs ($n=1000$).}
+\label{fig:prob31_n1000_mixed_trunc_const_k12_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_mod/Prob31_n10000_mixedfd_const_k12_mod.tex}{
+\input{tables_mod/Prob31_n10000_mixedfd_const_k12_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n10000_mixed_fd_k12_RateOfConv}
+\caption{Problem 31, Truncated Newton, mixed FD (constant $h$, $k=12$): experimental convergence rate $p_{exp}$ for converged runs ($n=10000$).}
+\label{fig:prob31_n10000_mixed_trunc_const_k12_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_mod/Prob31_n100000_mixedfd_const_k12_mod.tex}{
+\input{tables_mod/Prob31_n100000_mixedfd_const_k12_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n100000_mixed_fd_k12_RateOfConv}
+\caption{Problem 31, Truncated Newton, mixed FD (constant $h$, $k=12$): experimental convergence rate $p_{exp}$ for converged runs ($n=100000$).}
+\label{fig:Prob31_n100000_mixed_trunc_const_k12_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\subsection{Problem 83}
+
+
+% -------------------------
+% Modified Newton
+% -------------------------
+\subsubsection{Modified Newton}
+
+% =========================================================
+% k = 4
+% =========================================================
+\subsubsection*{\textbf{Mixed FD (constant $h$), $k=4$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_mod/Prob83_n2_mixedfd_const_k4_mod.tex}{
+\input{tables_mod/Prob83_n2_mixedfd_const_k4_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob83_n2_mixed_fd_kG4_kH2_k4_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob83_n2_mixed_fd_k4_RateOfConv}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob83_n2_mixed_mod_const_k4}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- N > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_mod/Prob83_n1000_mixedfd_const_k4_mod.tex}{
+\input{tables_mod/Prob83_n1000_mixedfd_const_k4_mod}
+
+}{}
+
+\IfFileExists{tables_mod/Prob83_n10000_mixedfd_const_k4_mod.tex}{
+\input{tables_mod/Prob83_n10000_mixedfd_const_k4_mod}
+
+
+}{}
+\IfFileExists{tables_mod/Prob83_n100000_mixedfd_const_k4_mod.tex}{
+\input{tables_mod/Prob83_n100000_mixedfd_const_k4_mod}
+
+}{}
+
+
+% =========================================================
+% k = 8
+% =========================================================
+\subsubsection*{\textbf{Mixed FD (constant $h$), $k=8$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_mod/Prob83_n2_mixedfd_const_k8_mod.tex}{
+\input{tables_mod/Prob83_n2_mixedfd_const_k8_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob83_n2_mixed_fd_kG8_kH4_k8_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob83_n2_mixed_fd_k8_RateOfConv.png}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob83_n2_mixed_mod_const_k8}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- N > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_mod/Prob83_n1000_mixedfd_const_k8_mod.tex}{
+\input{tables_mod/Prob83_n1000_mixedfd_const_k8_mod}
+
+}{}
+
+\IfFileExists{tables_mod/Prob83_n10000_mixedfd_const_k8_mod.tex}{
+\input{tables_mod/Prob83_n10000_mixedfd_const_k8_mod}
+
+}{}
+
+\IfFileExists{tables_mod/Prob83_n100000_mixedfd_const_k8_mod.tex}{
+\input{tables_mod/Prob83_n100000_mixedfd_const_k8_mod}
+
+}{}
+
+
+% =========================================================
+% k = 12
+% =========================================================
+\subsubsection*{\textbf{Mixed FD (constant $h$), $k=12$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_mod/Prob83_n2_mixedfd_const_k12_mod.tex}{
+\input{tables_mod/Prob83_n2_mixedfd_const_k12_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob83_n2_mixed_fd_kG12_kH6_k12_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob83_n2_mixed_fd_k12_RateOfConv}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob83_n2_mixed_mod_const_k12}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- N > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_mod/Prob83_n1000_mixedfd_const_k12_mod.tex}{
+\input{tables_mod/Prob83_n1000_mixedfd_const_k12_mod}
+
+}{}
+
+\IfFileExists{tables_mod/Prob83_n10000_mixedfd_const_k12_mod.tex}{
+\input{tables_mod/Prob83_n10000_mixedfd_const_k12_mod}
+
+}{}
+
+\IfFileExists{tables_mod/Prob83_n100000_mixedfd_const_k12_mod.tex}{
+\input{tables_mod/Prob83_n100000_mixedfd_const_k12_mod}
+
+}{}
+
+
+\newpage
+\subsubsection{Truncated Newton}
+\section{Results - Mixed (component-wise $h$)}
+
+% =========================================================
+% Problem 31
+% =========================================================
+\subsection{Problem 31}
+
+% -------------------------
+% Modified Newton
+% -------------------------
+\subsubsection{Modified Newton}
+
+% =========================================================
+% k = 4
+% =========================================================
+\subsubsection*{\textbf{Mixed FD (component-wise $h$), $k=4$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_mod/Prob31_n2_mixedfd_hprop_k4_mod.tex}{
+\input{tables_mod/Prob31_n2_mixedfd_hprop_k4_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob31_n2_mixed_fd_h_prop_kG4_kH2_k4_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob31_n2_mixed_fd_h_prop_k4_RateOfConv}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob31_n2_mixed_mod_hprop_k4}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- N > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_mod/Prob31_n1000_mixedfd_hprop_k4_mod.tex}{
+\input{tables_mod/Prob31_n1000_mixedfd_hprop_k4_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n1000_mixed_fd_h_prop_k4_RateOfConv}
+\caption{Problem 31, Modified Newton, mixed FD (component-wise $h$, $k=4$): experimental convergence rate $p_{exp}$ for converged runs ($n=1000$).}
+\label{fig:prob31_n1000_mixed_mod_hprop_k4_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_mod/Prob31_n10000_mixedfd_hprop_k4_mod.tex}{
+\input{tables_mod/Prob31_n10000_mixedfd_hprop_k4_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n10000_mixed_fd_h_prop_k4_RateOfConv}
+\caption{Problem 31, Modified Newton, mixed FD (component-wise $h$, $k=4$): experimental convergence rate $p_{exp}$ for converged runs ($n=10000$).}
+\label{fig:prob31_n10000_mixed_mod_hprop_k4_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_mod/Prob31_n100000_mixedfd_hprop_k4_mod.tex}{
+\input{tables_mod/Prob31_n100000_mixedfd_hprop_k4_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n100000_mixed_fd_h_prop_k4_RateOfConv}
+\caption{Problem 31, Modified Newton, mixed FD (component-wise $h$, $k=4$): experimental convergence rate $p_{exp}$ for converged runs ($n=100000$).}
+\label{fig:prob31_n100000_mixed_mod_hprop_k4_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+
+% =========================================================
+% k = 8
+% =========================================================
+\subsubsection*{\textbf{Mixed FD (component-wise $h$), $k=8$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_mod/Prob31_n2_mixedfd_hprop_k8_mod.tex}{
+\input{tables_mod/Prob31_n2_mixedfd_hprop_k8_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob31_n2_mixed_fd_h_prop_kG8_kH4_k8_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob31_n2_mixed_fd_h_prop_k8_RateOfConv.png}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob31_n2_mixed_mod_hprop_k8}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- N > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_mod/Prob31_n1000_mixedfd_hprop_k8_mod.tex}{
+\input{tables_mod/Prob31_n1000_mixedfd_hprop_k8_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n1000_mixed_fd_h_prop_k8_RateOfConv.png}
+\caption{Problem 31, Modified Newton, mixed FD (component-wise $h$, $k=8$): experimental convergence rate $p_{exp}$ for converged runs ($n=1000$).}
+\label{fig:prob31_n1000_mixed_mod_hprop_k8_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_mod/Prob31_n10000_mixedfd_hprop_k8_mod.tex}{
+\input{tables_mod/Prob31_n10000_mixedfd_hprop_k8_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n10000_mixed_fd_h_prop_k8_RateOfConv.png}
+\caption{Problem 31, Modified Newton, mixed FD (component-wise $h$, $k=8$): experimental convergence rate $p_{exp}$ for converged runs ($n=10000$).}
+\label{fig:prob31_n10000_mixed_mod_hprop_k8_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_mod/Prob31_n100000_mixedfd_hprop_k8_mod.tex}{
+\input{tables_mod/Prob31_n100000_mixedfd_hprop_k8_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n100000_mixed_fd_h_prop_k8_RateOfConv.png}
+\caption{Problem 31, Modified Newton, mixed FD (component-wise $h$, $k=8$): experimental convergence rate $p_{exp}$ for converged runs ($n=100000$).}
+\label{fig:prob31_n100000_mixed_mod_hprop_k8_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+
+% =========================================================
+% k = 12
+% =========================================================
+\subsubsection*{\textbf{Mixed FD (component-wise $h$), $k=12$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_mod/Prob31_n2_mixedfd_hprop_k12_mod.tex}{
+\input{tables_mod/Prob31_n2_mixedfd_hprop_k12_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob31_n2_mixed_fd_h_prop_kG12_kH6_k12_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob31_n2_mixed_fd_h_prop_k12_RateOfConv}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob31_n2_mixed_mod_hprop_k12}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- N > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_mod/Prob31_n1000_mixedfd_hprop_k12_mod.tex}{
+\input{tables_mod/Prob31_n1000_mixedfd_hprop_k12_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n1000_mixed_fd_h_prop_k12_RateOfConv}
+\caption{Problem 31, Modified Newton, mixed FD (component-wise $h$, $k=12$): experimental convergence rate $p_{exp}$ for converged runs ($n=1000$).}
+\label{fig:prob31_n1000_mixed_mod_hprop_k12_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_mod/Prob31_n10000_mixedfd_hprop_k12_mod.tex}{
+\input{tables_mod/Prob31_n10000_mixedfd_hprop_k12_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n10000_mixed_fd_h_prop_k12_RateOfConv}
+\caption{Problem 31, Modified Newton, mixed FD (component-wise $h$, $k=12$): experimental convergence rate $p_{exp}$ for converged runs ($n=10000$).}
+\label{fig:prob31_n10000_mixed_mod_hprop_k12_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_mod/Prob31_n100000_mixedfd_hprop_k12_mod.tex}{
+\input{tables_mod/Prob31_n100000_mixedfd_hprop_k12_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n100000_mixed_fd_h_prop_k12_RateOfConv}
+\caption{Problem 31, Modified Newton, mixed FD (component-wise $h$, $k=12$): experimental convergence rate $p_{exp}$ for converged runs ($n=100000$).}
+\label{fig:Prob31_n100000_mixed_mod_hprop_k12_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+
+
+\subsubsection{Truncated Newton}
+
+% =========================================================
+% k = 4
+% =========================================================
+\subsubsection*{\textbf{Mixed FD (component-wise $h$), $k=4$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_trunc/Prob31_n2_mixedfd_hprop_k4_trunc.tex}{
+\input{tables_trunc/Prob31_n2_mixedfd_hprop_k4_trunc}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_trunc/Prob31_n2_mixed_fd_h_prop_k4_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_trunc/Prob31_n2_mixed_fd_h_prop_k4_RateOfConv}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob31_n2_mixed_trunc_hprop_k4}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- N > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_trunc/Prob31_n1000_mixedfd_hprop_k4_trunc.tex}{
+\input{tables_trunc/Prob31_n1000_mixedfd_hprop_k4_trunc}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_trunc/Prob31_n1000_mixed_fd_h_prop_k4_RateOfConv}
+\caption{Problem 31, Truncated Newton, mixed FD (component-wise $h$, $k=4$): experimental convergence rate $p_{exp}$ for converged runs ($n=1000$).}
+\label{fig:prob31_n1000_mixed_trunc_hprop_k4_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_trunc/Prob31_n10000_mixedfd_hprop_k4_trunc.tex}{
+\input{tables_trunc/Prob31_n10000_mixedfd_hprop_k4_trunc}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_trunc/Prob31_n10000_mixed_fd_h_prop_k4_RateOfConv}
+\caption{Problem 31, Truncated Newton, mixed FD (component-wise $h$, $k=4$): experimental convergence rate $p_{exp}$ for converged runs ($n=10000$).}
+\label{fig:prob31_n10000_mixed_trunc_hprop_k4_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_trunc/Prob31_n100000_mixedfd_hprop_k4_trunc.tex}{
+\input{tables_trunc/Prob31_n100000_mixedfd_hprop_k4_trunc}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_trunc/Prob31_n100000_mixed_fd_h_prop_k4_RateOfConv}
+\caption{Problem 31, Truncated Newton, mixed FD (component-wise $h$, $k=4$): experimental convergence rate $p_{exp}$ for converged runs ($n=100000$).}
+\label{fig:prob31_n100000_mixed_trunc_hprop_k4_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+% =========================================================
+% k = 8
+% =========================================================
+\subsubsection*{\textbf{Mixed FD (component-wise $h$), $k=8$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_trunc/Prob31_n2_mixedfd_hprop_k8_trunc.tex}{
+\input{tables_trunc/Prob31_n2_mixedfd_hprop_k8_trunc}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_trunc/Prob31_n2_mixed_fd_h_prop_k8_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_trunc/Prob31_n2_mixed_fd_h_prop_k8_RateOfConv}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob31_n2_mixed_trunc_hprop_k8}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- N > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_trunc/Prob31_n1000_mixedfd_hprop_k8_trunc.tex}{
+\input{tables_trunc/Prob31_n1000_mixedfd_hprop_k8_trunc}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_trunc/Prob31_n1000_mixed_fd_h_prop_k8_RateOfConv}
+\caption{Problem 31, Truncated Newton, mixed FD (component-wise $h$, $k=8$): experimental convergence rate $p_{exp}$ for converged runs ($n=1000$).}
+\label{fig:prob31_n1000_mixed_trunc_hprop_k8_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_trunc/Prob31_n10000_mixedfd_hprop_k8_trunc.tex}{
+\input{tables_trunc/Prob31_n10000_mixedfd_hprop_k8_trunc}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_trunc/Prob31_n10000_mixed_fd_h_prop_k8_RateOfConv}
+\caption{Problem 31, Truncated Newton, mixed FD (component-wise $h$, $k=8$): experimental convergence rate $p_{exp}$ for converged runs ($n=10000$).}
+\label{fig:prob31_n10000_mixed_trunc_hprop_k8_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_trunc/Prob31_n100000_mixedfd_hprop_k8_trunc.tex}{
+\input{tables_trunc/Prob31_n100000_mixedfd_hprop_k8_trunc}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_trunc/Prob31_n100000_mixed_fd_h_prop_k8_RateOfConv}
+\caption{Problem 31, Truncated Newton, mixed FD (component-wise $h$, $k=8$): experimental convergence rate $p_{exp}$ for converged runs ($n=100000$).}
+\label{fig:prob31_n100000_mixed_trunc_hprop_k8_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+% =========================================================
+% k = 12
+% =========================================================
+\subsubsection*{\textbf{Mixed FD (component-wise $h$), $k=12$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_trunc/Prob31_n2_mixedfd_hprop_k12_trunc.tex}{
+\input{tables_trunc/Prob31_n2_mixedfd_hprop_k12_trunc}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_trunc/Prob31_n2_mixed_fd_h_prop_k12_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_trunc/Prob31_n2_mixed_fd_h_prop_k12_RateOfConv}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob31_n2_mixed_trunc_hprop_k12}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- N > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_trunc/Prob31_n1000_mixedfd_hprop_k12_trunc.tex}{
+\input{tables_trunc/Prob31_n1000_mixedfd_hprop_k12_trunc}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_trunc/Prob31_n1000_mixed_fd_h_prop_k12_RateOfConv}
+\caption{Problem 31, Truncated Newton, mixed FD (component-wise $h$, $k=12$): experimental convergence rate $p_{exp}$ for converged runs ($n=1000$).}
+\label{fig:prob31_n1000_mixed_trunc_hprop_k12_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_trunc/Prob31_n10000_mixedfd_hprop_k12_trunc.tex}{
+\input{tables_trunc/Prob31_n10000_mixedfd_hprop_k12_trunc}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_trunc/Prob31_n10000_mixed_fd_h_prop_k12_RateOfConv}
+\caption{Problem 31, Truncated Newton, mixed FD (component-wise $h$, $k=12$): experimental convergence rate $p_{exp}$ for converged runs ($n=10000$).}
+\label{fig:prob31_n10000_mixed_trunc_hprop_k12_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_trunc/Prob31_n100000_mixedfd_hprop_k12_trunc.tex}{
+\input{tables_trunc/Prob31_n100000_mixedfd_hprop_k12_trunc}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_trunc/Prob31_n100000_mixed_fd_h_prop_k12_RateOfConv}
+\caption{Problem 31, Truncated Newton, mixed FD (component-wise $h$, $k=12$): experimental convergence rate $p_{exp}$ for converged runs ($n=100000$).}
+\label{fig:Prob31_n100000_mixed_trunc_hprop_k12_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\subsection{Problem 83}
+
+
+% -------------------------
+% Modified Newton
+% -------------------------
+\subsubsection{Modified Newton}
+
+% =========================================================
+% k = 4
+% =========================================================
+\subsubsection*{\textbf{Mixed FD (component-wise $h$), $k=4$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_mod/Prob83_n2_mixedfd_hprop_k4_mod.tex}{
+\input{tables_mod/Prob83_n2_mixedfd_hprop_k4_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob83_n2_mixed_fd_h_prop_kG4_kH2_k4_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob83_n2_mixed_fd_h_prop_k4_RateOfConv}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob83_n2_mixed_mod_hprop_k4}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- N > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_mod/Prob83_n1000_mixedfd_hprop_k4_mod.tex}{
+\input{tables_mod/Prob83_n1000_mixedfd_hprop_k4_mod}
+
+}{}
+
+\IfFileExists{tables_mod/Prob83_n10000_mixedfd_hprop_k4_mod.tex}{
+\input{tables_mod/Prob83_n10000_mixedfd_hprop_k4_mod}
+
+}{}
+
+\IfFileExists{tables_mod/Prob83_n100000_mixedfd_hprop_k4_mod.tex}{
+\input{tables_mod/Prob83_n100000_mixedfd_hprop_k4_mod}
+
+}{}
+
+
+% =========================================================
+% k = 8
+% =========================================================
+\subsubsection*{\textbf{Mixed FD (component-wise $h$), $k=8$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_mod/Prob83_n2_mixedfd_hprop_k8_mod.tex}{
+\input{tables_mod/Prob83_n2_mixedfd_hprop_k8_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob83_n2_mixed_fd_h_prop_kG8_kH4_k8_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob83_n2_mixed_fd_h_prop_k8_RateOfConv.png}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob83_n2_mixed_mod_hprop_k8}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- N > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_mod/Prob83_n1000_mixedfd_hprop_k8_mod.tex}{
+\input{tables_mod/Prob83_n1000_mixedfd_hprop_k8_mod}
+
+}{}
+
+\IfFileExists{tables_mod/Prob83_n10000_mixedfd_hprop_k8_mod.tex}{
+\input{tables_mod/Prob83_n10000_mixedfd_hprop_k8_mod}
+
+}{}
+
+\IfFileExists{tables_mod/Prob83_n100000_mixedfd_hprop_k8_mod.tex}{
+\input{tables_mod/Prob83_n100000_mixedfd_hprop_k8_mod}
+
+}{}
+
+
+% =========================================================
+% k = 12
+% =========================================================
+\subsubsection*{\textbf{Mixed FD (component-wise $h$), $k=12$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_mod/Prob83_n2_mixedfd_hprop_k12_mod.tex}{
+\input{tables_mod/Prob83_n2_mixedfd_hprop_k12_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob83_n2_mixed_fd_h_prop_kG12_kH6_k12_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob83_n2_mixed_fd_h_prop_k12_RateOfConv}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob83_n2_mixed_mod_hprop_k12}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- N > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_mod/Prob83_n1000_mixedfd_hprop_k12_mod.tex}{
+\input{tables_mod/Prob83_n1000_mixedfd_hprop_k12_mod}
+
+}{}
+
+\IfFileExists{tables_mod/Prob83_n10000_mixedfd_hprop_k12_mod.tex}{
+\input{tables_mod/Prob83_n10000_mixedfd_hprop_k12_mod}
+
+}{}
+
+\IfFileExists{tables_mod/Prob83_n100000_mixedfd_hprop_k12_mod.tex}{
+\input{tables_mod/Prob83_n100000_mixedfd_hprop_k12_mod}
+
+}{}
+
+\subsubsection{Truncated Newton}
+
+% =========================================================
+% k = 4
+% =========================================================
+\subsubsection*{\textbf{Mixed FD (component-wise $h$), $k=4$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_trunc/Prob83_n2_mixedfd_hprop_k4_trunc.tex}{
+\input{tables_trunc/Prob83_n2_mixedfd_hprop_k4_trunc}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_trunc/Prob83_n2_mixed_fd_h_prop_k4_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_trunc/Prob83_n2_mixed_fd_h_prop_k4_RateOfConv}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob83_n2_mixed_trunc_hprop_k4}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- N > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_trunc/Prob83_n1000_mixedfd_hprop_k4_trunc.tex}{
+\input{tables_trunc/Prob83_n1000_mixedfd_hprop_k4_trunc}
+}{}
+
+\IfFileExists{tables_trunc/Prob83_n10000_mixedfd_hprop_k4_trunc.tex}{
+\input{tables_trunc/Prob83_n10000_mixedfd_hprop_k4_trunc}
+}{}
+
+\IfFileExists{tables_trunc/Prob83_n100000_mixedfd_hprop_k4_trunc.tex}{
+\input{tables_trunc/Prob83_n100000_mixedfd_hprop_k4_trunc}
+}{}
+
+% =========================================================
+% k = 8
+% =========================================================
+\subsubsection*{\textbf{Mixed FD (component-wise $h$), $k=8$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_trunc/Prob83_n2_mixedfd_hprop_k8_trunc.tex}{
+\input{tables_trunc/Prob83_n2_mixedfd_hprop_k8_trunc}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_trunc/Prob83_n2_mixed_fd_h_prop_k8_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_trunc/Prob83_n2_mixed_fd_h_prop_k8_RateOfConv}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob83_n2_mixed_trunc_hprop_k8}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- N > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_trunc/Prob83_n1000_mixedfd_hprop_k8_trunc.tex}{
+\input{tables_trunc/Prob83_n1000_mixedfd_hprop_k8_trunc}
+}{}
+
+\IfFileExists{tables_trunc/Prob83_n10000_mixedfd_hprop_k8_trunc.tex}{
+\input{tables_trunc/Prob83_n10000_mixedfd_hprop_k8_trunc}
+}{}
+
+\IfFileExists{tables_trunc/Prob83_n100000_mixedfd_hprop_k8_trunc.tex}{
+\input{tables_trunc/Prob83_n100000_mixedfd_hprop_k8_trunc}
+}{}
+
+% =========================================================
+% k = 12
+% =========================================================
+\subsubsection*{\textbf{Mixed FD (component-wise $h$), $k=12$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_trunc/Prob83_n2_mixedfd_hprop_k12_trunc.tex}{
+\input{tables_trunc/Prob83_n2_mixedfd_hprop_k12_trunc}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_trunc/Prob83_n2_mixed_fd_h_prop_k12_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_trunc/Prob83_n2_mixed_fd_h_prop_k12_RateOfConv}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob83_n2_mixed_trunc_hprop_k12}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- N > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_trunc/Prob83_n1000_mixedfd_hprop_k12_trunc.tex}{
+\input{tables_trunc/Prob83_n1000_mixedfd_hprop_k12_trunc}
+}{}
+
+\IfFileExists{tables_trunc/Prob83_n10000_mixedfd_hprop_k12_trunc.tex}{
+\input{tables_trunc/Prob83_n10000_mixedfd_hprop_k12_trunc}
+}{}
+
+\IfFileExists{tables_trunc/Prob83_n100000_mixedfd_hprop_k12_trunc.tex}{
+\input{tables_trunc/Prob83_n100000_mixedfd_hprop_k12_trunc}
+}{}
+
+\newpage
+\section{Results - Full FD (constant $h$)}
+
+% =========================================================
+% Problem 31
+% =========================================================
+\subsection{Problem 31}
+
+% -------------------------
+% Modified Newton
+% -------------------------
+\subsubsection{Modified Newton}
+
+% =========================================================
+% k = 4
+% =========================================================
+\subsubsection*{\textbf{Full FD (constant $h$), $k=4$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_mod/Prob31_n2_fullfd_const_k4_mod.tex}{
+\input{tables_mod/Prob31_n2_fullfd_const_k4_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob31_n2_full_fd_kG4_kH2_k4_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob31_n2_full_fd_k4_RateOfConv}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob31_n2_full_mod_const_k4}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- N > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_mod/Prob31_n1000_fullfd_const_k4_mod.tex}{
+\input{tables_mod/Prob31_n1000_fullfd_const_k4_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n1000_full_fd_k4_RateOfConv}
+\caption{Problem 31, Modified Newton, full FD (constant $h$, $k=4$): experimental convergence rate $p_{exp}$ for converged runs ($n=1000$).}
+\label{fig:prob31_n1000_full_mod_const_k4_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_mod/Prob31_n10000_fullfd_const_k4_mod.tex}{
+\input{tables_mod/Prob31_n10000_fullfd_const_k4_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n10000_full_fd_k4_RateOfConv}
+\caption{Problem 31, Modified Newton, full FD (constant $h$, $k=4$): experimental convergence rate $p_{exp}$ for converged runs ($n=10000$).}
+\label{fig:prob31_n10000_full_mod_const_k4_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_mod/Prob31_n100000_fullfd_const_k4_mod.tex}{
+\input{tables_mod/Prob31_n100000_fullfd_const_k4_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n100000_full_fd_k4_RateOfConv}
+\caption{Problem 31, Modified Newton, full FD (constant $h$, $k=4$): experimental convergence rate $p_{exp}$ for converged runs ($n=100000$).}
+\label{fig:prob31_n100000_full_const_k4_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+
+% =========================================================
+% k = 8
+% =========================================================
+\subsubsection*{\textbf{Full FD (constant $h$), $k=8$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_mod/Prob31_n2_fullfd_const_k8_mod.tex}{
+\input{tables_mod/Prob31_n2_fullfd_const_k8_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob31_n2_full_fd_kG8_kH4_k8_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob31_n2_full_fd_k8_RateOfConv.png}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob31_n2_full_mod_const_k8}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- N > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_mod/Prob31_n1000_fullfd_const_k8_mod.tex}{
+\input{tables_mod/Prob31_n1000_fullfd_const_k8_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n1000_full_fd_k8_RateOfConv.png}
+\caption{Problem 31, Modified Newton, full FD (constant $h$, $k=8$): experimental convergence rate $p_{exp}$ for converged runs ($n=1000$).}
+\label{fig:prob31_n1000_full_mod_const_k8_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_mod/Prob31_n10000_fullfd_const_k8_mod.tex}{
+\input{tables_mod/Prob31_n10000_fullfd_const_k8_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n10000_full_fd_k8_RateOfConv.png}
+\caption{Problem 31, Modified Newton, full FD (constant $h$, $k=8$): experimental convergence rate $p_{exp}$ for converged runs ($n=10000$).}
+\label{fig:prob31_n10000_full_mod_const_k8_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_mod/Prob31_n100000_fullfd_const_k8_mod.tex}{
+\input{tables_mod/Prob31_n100000_fullfd_const_k8_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n100000_full_fd_k8_RateOfConv.png}
+\caption{Problem 31, Modified Newton, full FD (constant $h$, $k=8$): experimental convergence rate $p_{exp}$ for converged runs ($n=100000$).}
+\label{fig:prob31_n100000_full_mod_k8_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+
+% =========================================================
+% k = 12
+% =========================================================
+\subsubsection*{\textbf{Full FD (constant $h$), $k=12$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_mod/Prob31_n2_fullfd_const_k12_mod.tex}{
+\input{tables_mod/Prob31_n2_fullfd_const_k12_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob31_n2_full_fd_kG12_kH6_k12_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob31_n2_full_fd_k12_RateOfConv}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob31_n2_full_mod_const_k12}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- N > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_mod/Prob31_n1000_fullfd_const_k12_mod.tex}{
+\input{tables_mod/Prob31_n1000_fullfd_const_k12_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n1000_full_fd_k12_RateOfConv}
+\caption{Problem 31, Modified Newton, full FD (constant $h$, $k=12$): experimental convergence rate $p_{exp}$ for converged runs ($n=1000$).}
+\label{fig:prob31_n1000_full_mod_const_k12_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_mod/Prob31_n10000_fullfd_const_k12_mod.tex}{
+\input{tables_mod/Prob31_n10000_fullfd_const_k12_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n10000_full_fd_k12_RateOfConv}
+\caption{Problem 31, Modified Newton, full FD (constant $h$, $k=12$): experimental convergence rate $p_{exp}$ for converged runs ($n=10000$).}
+\label{fig:prob31_n10000_full_mod_const_k12_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_mod/Prob31_n100000_fullfd_const_k12_mod.tex}{
+\input{tables_mod/Prob31_n100000_fullfd_const_k12_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n100000_full_fd_k12_RateOfConv}
+\caption{Problem 31, Modified Newton, full FD (constant $h$, $k=12$): experimental convergence rate $p_{exp}$ for converged runs ($n=100000$).}
+\label{fig:Prob31_n100000_full_mod_const_k12_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+
+
+\subsubsection{Truncated Newton}
+
+% =========================================================
+% k = 4
+% =========================================================
+\subsubsection*{\textbf{Full FD (constant $h$), $k=4$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_trunc/Prob31_n2_fullfd_const_k4_trunc.tex}{
+\input{tables_trunc/Prob31_n2_fullfd_const_k4_trunc}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_trunc/Prob31_n2_full_fd_const_k4_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_trunc/Prob31_n2_full_fd_const_k4_RateOfConv}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob31_n2_full_trunc_const_k4}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- N > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_trunc/Prob31_n1000_fullfd_const_k4_trunc.tex}{
+\input{tables_trunc/Prob31_n1000_fullfd_const_k4_trunc}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_trunc/Prob31_n1000_full_fd_const_k4_RateOfConv}
+\caption{Problem 31, Truncated Newton, full FD (constant $h$, $k=4$): experimental convergence rate $p_{exp}$ for converged runs ($n=1000$).}
+\label{fig:prob31_n1000_full_trunc_const_k4_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_trunc/Prob31_n10000_fullfd_const_k4_trunc.tex}{
+\input{tables_trunc/Prob31_n10000_fullfd_const_k4_trunc}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_trunc/Prob31_n10000_full_fd_const_k4_RateOfConv}
+\caption{Problem 31, Truncated Newton, full FD (constant $h$, $k=4$): experimental convergence rate $p_{exp}$ for converged runs ($n=10000$).}
+\label{fig:prob31_n10000_full_trunc_const_k4_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_trunc/Prob31_n100000_fullfd_const_k4_trunc.tex}{
+\input{tables_trunc/Prob31_n100000_fullfd_const_k4_trunc}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_trunc/Prob31_n100000_full_fd_const_k4_RateOfConv}
+\caption{Problem 31, Truncated Newton, full FD (constant $h$, $k=4$): experimental convergence rate $p_{exp}$ for converged runs ($n=100000$).}
+\label{fig:prob31_n100000_full_trunc_const_k4_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+% =========================================================
+% k = 8
+% =========================================================
+\subsubsection*{\textbf{Full FD (constant $h$), $k=8$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_trunc/Prob31_n2_fullfd_const_k8_trunc.tex}{
+\input{tables_trunc/Prob31_n2_fullfd_const_k8_trunc}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_trunc/Prob31_n2_full_fd_const_k8_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_trunc/Prob31_n2_full_fd_const_k8_RateOfConv}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob31_n2_full_trunc_const_k8}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- N > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_trunc/Prob31_n1000_fullfd_const_k8_trunc.tex}{
+\input{tables_trunc/Prob31_n1000_fullfd_const_k8_trunc}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_trunc/Prob31_n1000_full_fd_const_k8_RateOfConv}
+\caption{Problem 31, Truncated Newton, full FD (constant $h$, $k=8$): experimental convergence rate $p_{exp}$ for converged runs ($n=1000$).}
+\label{fig:prob31_n1000_full_trunc_const_k8_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_trunc/Prob31_n10000_fullfd_const_k8_trunc.tex}{
+\input{tables_trunc/Prob31_n10000_fullfd_const_k8_trunc}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_trunc/Prob31_n10000_full_fd_const_k8_RateOfConv}
+\caption{Problem 31, Truncated Newton, full FD (constant $h$, $k=8$): experimental convergence rate $p_{exp}$ for converged runs ($n=10000$).}
+\label{fig:prob31_n10000_full_trunc_const_k8_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_trunc/Prob31_n100000_fullfd_const_k8_trunc.tex}{
+\input{tables_trunc/Prob31_n100000_fullfd_const_k8_trunc}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_trunc/Prob31_n100000_full_fd_const_k8_RateOfConv}
+\caption{Problem 31, Truncated Newton, full FD (constant $h$, $k=8$): experimental convergence rate $p_{exp}$ for converged runs ($n=100000$).}
+\label{fig:prob31_n100000_full_trunc_k8_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+% =========================================================
+% k = 12
+% =========================================================
+\subsubsection*{\textbf{Full FD (constant $h$), $k=12$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_trunc/Prob31_n2_fullfd_const_k12_trunc.tex}{
+\input{tables_trunc/Prob31_n2_fullfd_const_k12_trunc}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_trunc/Prob31_n2_full_fd_const_k12_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_trunc/Prob31_n2_full_fd_const_k12_RateOfConv}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob31_n2_full_trunc_const_k12}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- N > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_trunc/Prob31_n1000_fullfd_const_k12_trunc.tex}{
+\input{tables_trunc/Prob31_n1000_fullfd_const_k12_trunc}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_trunc/Prob31_n1000_full_fd_const_k12_RateOfConv}
+\caption{Problem 31, Truncated Newton, full FD (constant $h$, $k=12$): experimental convergence rate $p_{exp}$ for converged runs ($n=1000$).}
+\label{fig:prob31_n1000_full_trunc_const_k12_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_trunc/Prob31_n10000_fullfd_const_k12_trunc.tex}{
+\input{tables_trunc/Prob31_n10000_fullfd_const_k12_trunc}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_trunc/Prob31_n10000_full_fd_const_k12_RateOfConv}
+\caption{Problem 31, Truncated Newton, full FD (constant $h$, $k=12$): experimental convergence rate $p_{exp}$ for converged runs ($n=10000$).}
+\label{fig:prob31_n10000_full_trunc_const_k12_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_trunc/Prob31_n100000_fullfd_const_k12_trunc.tex}{
+\input{tables_trunc/Prob31_n100000_fullfd_const_k12_trunc}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_trunc/Prob31_n100000_full_fd_const_k12_RateOfConv}
+\caption{Problem 31, Truncated Newton, full FD (constant $h$, $k=12$): experimental convergence rate $p_{exp}$ for converged runs ($n=100000$).}
+\label{fig:Prob31_n100000_full_trunc_const_k12_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\subsection{Problem 83}
+
+
+% -------------------------
+% Modified Newton
+% -------------------------
+\subsubsection{Modified Newton}
+
+% =========================================================
+% k = 4
+% =========================================================
+\subsubsection*{\textbf{Full FD (constant $h$), $k=4$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_mod/Prob83_n2_fullfd_const_k4_mod.tex}{
+\input{tables_mod/Prob83_n2_fullfd_const_k4_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob83_n2_full_fd_kG4_kH2_k4_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob83_n2_full_fd_k4_RateOfConv}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob83_n2_full_mod_const_k4}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- N > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_mod/Prob83_n1000_fullfd_const_k4_mod.tex}{
+\input{tables_mod/Prob83_n1000_fullfd_const_k4_mod}
+
+}{}
+
+\IfFileExists{tables_mod/Prob83_n10000_fullfd_const_k4_mod.tex}{
+\input{tables_mod/Prob83_n10000_fullfd_const_k4_mod}
+
+}{}
+
+\IfFileExists{tables_mod/Prob83_n100000_fullfd_const_k4_mod.tex}{
+\input{tables_mod/Prob83_n100000_fullfd_const_k4_mod}
+
+}{}
+
+
+% =========================================================
+% k = 8
+% =========================================================
+\subsubsection*{\textbf{Full FD (constant $h$), $k=8$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_mod/Prob83_n2_fullfd_const_k8_mod.tex}{
+\input{tables_mod/Prob83_n2_fullfd_const_k8_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob83_n2_full_fd_kG8_kH4_k8_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob83_n2_full_fd_k8_RateOfConv.png}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob83_n2_full_mod_const_k8}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- N > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_mod/Prob83_n1000_fullfd_const_k8_mod.tex}{
+\input{tables_mod/Prob83_n1000_fullfd_const_k8_mod}
+
+}{}
+
+\IfFileExists{tables_mod/Prob83_n10000_fullfd_const_k8_mod.tex}{
+\input{tables_mod/Prob83_n10000_fullfd_const_k8_mod}
+
+}{}
+
+\IfFileExists{tables_mod/Prob83_n100000_fullfd_const_k8_mod.tex}{
+\input{tables_mod/Prob83_n100000_fullfd_const_k8_mod}
+
+}{}
+
+
+% =========================================================
+% k = 12
+% =========================================================
+\subsubsection*{\textbf{Full FD (constant $h$), $k=12$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_mod/Prob83_n2_fullfd_const_k12_mod.tex}{
+\input{tables_mod/Prob83_n2_fullfd_const_k12_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob83_n2_full_fd_kG12_kH6_k12_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob83_n2_full_fd_k12_RateOfConv}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob83_n2_full_mod_const_k12}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- N > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_mod/Prob83_n1000_fullfd_const_k12_mod.tex}{
+\input{tables_mod/Prob83_n1000_fullfd_const_k12_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob83_n1000_full_fd_k12_RateOfConv}
+\caption{Problem 83, Truncated Newton, full FD (constant $h$, $k=12$): experimental convergence rate $p_{exp}$ for converged runs ($n=1000$).}
+\label{fig:prob83_n1000_full_trunc_const_k12_rate}
+\end{figure}
+\FloatBarrier
+
+
+}{}
+
+\IfFileExists{tables_mod/Prob83_n10000_fullfd_const_k12_mod.tex}{
+\input{tables_mod/Prob83_n10000_fullfd_const_k12_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob83_n10000_full_fd_k12_RateOfConv}
+\caption{Problem 83, Truncated Newton, full FD (constant $h$, $k=12$): experimental convergence rate $p_{exp}$ for converged runs ($n=10000$).}
+\label{fig:prob83_n10000_full_trunc_const_k12_rate}
+\end{figure}
+\FloatBarrier
+
+}{}
+
+\IfFileExists{tables_mod/Prob83_n100000_fullfd_const_k12_mod.tex}{
+\input{tables_mod/Prob83_n100000_fullfd_const_k12_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob83_n100000_full_fd_k12_RateOfConv}
+\caption{Problem 83, Truncated Newton, full FD (constant $h$, $k=12$): experimental convergence rate $p_{exp}$ for converged runs ($n=100000$).}
+\label{fig:prob83_n100000_full_trunc_const_k12_rate}
+\end{figure}
+\FloatBarrier
+
+
+}{}
+
+\newpage
+\subsubsection{Truncated Newton}
+\newpage
+\section{Results - Full FD (component-wise $h$)}
+
+% =========================================================
+% Problem 31
+% =========================================================
+\subsection{Problem 31}
+
+% -------------------------
+% Modified Newton
+% -------------------------
+\subsubsection{Modified Newton}
+
+% =========================================================
+% k = 4
+% =========================================================
+\subsubsection*{\textbf{Full FD (component-wise $h$), $k=4$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_mod/Prob31_n2_fullfd_hprop_k4_mod.tex}{
+\input{tables_mod/Prob31_n2_fullfd_hprop_k4_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob31_n2_full_fd_h_prop_kG4_kH2_k4_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob31_n2_full_fd_h_prop_k4_RateOfConv}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob31_n2_full_mod_hprop_k4}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- n > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_mod/Prob31_n1000_fullfd_hprop_k4_mod.tex}{
+\input{tables_mod/Prob31_n1000_fullfd_hprop_k4_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n1000_full_fd_h_prop_k4_RateOfConv.png}
+\caption{Problem 31, Modified Newton, full FD (component-wise $h$, $k=4$): experimental convergence rate $p_{exp}$ for converged runs ($n=1000$).}
+\label{fig:prob31_n1000_full_mod_hprop_k4_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_mod/Prob31_n10000_fullfd_hprop_k4_mod.tex}{
+\input{tables_mod/Prob31_n10000_fullfd_hprop_k4_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n10000_full_fd_h_prop_k4_RateOfConv.png}
+\caption{Problem 31, Modified Newton, full FD (component-wise $h$, $k=4$): experimental convergence rate $p_{exp}$ for converged runs ($n=10000$).}
+\label{fig:prob31_n10000_full_mod_hprop_k4_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_mod/Prob31_n100000_fullfd_hprop_k4_mod.tex}{
+\input{tables_mod/Prob31_n100000_fullfd_hprop_k4_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n100000_full_fd_h_prop_k4_RateOfConv.png}
+\caption{Problem 31, Modified Newton, full FD (component-wise $h$, $k=4$): experimental convergence rate $p_{exp}$ for converged runs ($n=100000$).}
+\label{fig:prob31_n100000_full_mod_hprop_k4_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+
+% =========================================================
+% k = 8
+% =========================================================
+\subsubsection*{\textbf{Full FD (component-wise $h$), $k=8$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_mod/Prob31_n2_fullfd_hprop_k8_mod.tex}{
+\input{tables_mod/Prob31_n2_fullfd_hprop_k8_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob31_n2_full_fd_h_prop_kG8_kH4_k8_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob31_n2_full_fd_h_prop_k8_RateOfConv.png}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob31_n2_full_mod_hprop_k8}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- n > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_mod/Prob31_n1000_fullfd_hprop_k8_mod.tex}{
+\input{tables_mod/Prob31_n1000_fullfd_hprop_k8_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n1000_full_fd_h_prop_k8_RateOfConv.png}
+\caption{Problem 31, Modified Newton, full FD (component-wise $h$, $k=8$): experimental convergence rate $p_{exp}$ for converged runs ($n=1000$).}
+\label{fig:prob31_n1000_full_mod_hprop_k8_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_mod/Prob31_n10000_fullfd_hprop_k8_mod.tex}{
+\input{tables_mod/Prob31_n10000_fullfd_hprop_k8_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n10000_full_fd_h_prop_k8_RateOfConv.png}
+\caption{Problem 31, Modified Newton, full FD (component-wise $h$, $k=8$): experimental convergence rate $p_{exp}$ for converged runs ($n=10000$).}
+\label{fig:prob31_n10000_full_mod_hprop_k8_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_mod/Prob31_n100000_fullfd_hprop_k8_mod.tex}{
+\input{tables_mod/Prob31_n100000_fullfd_hprop_k8_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n100000_full_fd_h_prop_k8_RateOfConv.png}
+\caption{Problem 31, Modified Newton, full FD (component-wise $h$, $k=8$): experimental convergence rate $p_{exp}$ for converged runs ($n=100000$).}
+\label{fig:prob31_n100000_full_mod_hprop_k8_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+
+% =========================================================
+% k = 12
+% =========================================================
+\subsubsection*{\textbf{Full FD (component-wise $h$), $k=12$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_mod/Prob31_n2_fullfd_hprop_k12_mod.tex}{
+\input{tables_mod/Prob31_n2_fullfd_hprop_k12_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob31_n2_full_fd_h_prop_kG12_kH6_k12_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob31_n2_full_fd_h_prop_k12_RateOfConv}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob31_n2_full_mod_hprop_k12}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- n > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_mod/Prob31_n1000_fullfd_hprop_k12_mod.tex}{
+\input{tables_mod/Prob31_n1000_fullfd_hprop_k12_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n1000_full_fd_h_prop_k12_RateOfConv.png}
+\caption{Problem 31, Modified Newton, full FD (component-wise $h$, $k=12$): experimental convergence rate $p_{exp}$ for converged runs ($n=1000$).}
+\label{fig:prob31_n1000_full_mod_hprop_k12_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_mod/Prob31_n10000_fullfd_hprop_k12_mod.tex}{
+\input{tables_mod/Prob31_n10000_fullfd_hprop_k12_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n10000_full_fd_h_prop_k12_RateOfConv.png}
+\caption{Problem 31, Modified Newton, full FD (component-wise $h$, $k=12$): experimental convergence rate $p_{exp}$ for converged runs ($n=10000$).}
+\label{fig:prob31_n10000_full_mod_hprop_k12_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_mod/Prob31_n100000_fullfd_hprop_k12_mod.tex}{
+\input{tables_mod/Prob31_n100000_fullfd_hprop_k12_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob31_n100000_full_fd_h_prop_k12_RateOfConv.png}
+\caption{Problem 31, Modified Newton, full FD (component-wise $h$, $k=12$): experimental convergence rate $p_{exp}$ for converged runs ($n=100000$).}
+\label{fig:prob31_n100000_full_mod_hprop_k12_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+
+% =========================================================
+% Problem 83
+% =========================================================
+\subsection{Problem 83}
+
+% -------------------------
+% Modified Newton
+% -------------------------
+\subsubsection{Modified Newton}
+
+% =========================================================
+% k = 4
+% =========================================================
+\subsubsection*{\textbf{Full FD (component-wise $h$), $k=4$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_mod/Prob83_n2_fullfd_hprop_k4_mod.tex}{
+\input{tables_mod/Prob83_n2_fullfd_hprop_k4_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob83_n2_full_fd_h_prop_kG4_kH2_k4_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob83_n2_full_fd_h_prop_k4_RateOfConv}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob83_n2_full_mod_hprop_k4}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- n > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_mod/Prob83_n1000_fullfd_hprop_k4_mod.tex}{
+\input{tables_mod/Prob83_n1000_fullfd_hprop_k4_mod}
+
+}{}
+
+\IfFileExists{tables_mod/Prob83_n10000_fullfd_hprop_k4_mod.tex}{
+\input{tables_mod/Prob83_n10000_fullfd_hprop_k4_mod}
+
+}{}
+
+\IfFileExists{tables_mod/Prob83_n100000_fullfd_hprop_k4_mod.tex}{
+\input{tables_mod/Prob83_n100000_fullfd_hprop_k4_mod}
+
+}{}
+
+
+% =========================================================
+% k = 8
+% =========================================================
+\subsubsection*{\textbf{Full FD (component-wise $h$), $k=8$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_mod/Prob83_n2_fullfd_hprop_k8_mod.tex}{
+\input{tables_mod/Prob83_n2_fullfd_hprop_k8_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob83_n2_full_fd_h_prop_kG8_kH4_k8_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob83_n2_full_fd_h_prop_k8_RateOfConv.png}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob83_n2_full_mod_hprop_k8}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- n > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_mod/Prob83_n1000_fullfd_hprop_k8_mod.tex}{
+\input{tables_mod/Prob83_n1000_fullfd_hprop_k8_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob83_n1000_full_fd_h_prop_k8_RateOfConv.png}
+\caption{Problem 83, Modified Newton, full FD (component-wise $h$, $k=8$): experimental convergence rate $p_{exp}$ for converged runs ($n=1000$).}
+\label{fig:prob83_n1000_full_mod_hprop_k8_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_mod/Prob83_n10000_fullfd_hprop_k8_mod.tex}{
+\input{tables_mod/Prob83_n10000_fullfd_hprop_k8_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob83_n10000_full_fd_h_prop_k8_RateOfConv.png}
+\caption{Problem 83, Modified Newton, full FD (component-wise $h$, $k=8$): experimental convergence rate $p_{exp}$ for converged runs ($n=10000$).}
+\label{fig:prob83_n10000_full_mod_hprop_k8_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_mod/Prob83_n100000_fullfd_hprop_k8_mod.tex}{
+\input{tables_mod/Prob83_n100000_fullfd_hprop_k8_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob83_n100000_full_fd_h_prop_k8_RateOfConv.png}
+\caption{Problem 83, Modified Newton, full FD (component-wise $h$, $k=8$): experimental convergence rate $p_{exp}$ for converged runs ($n=100000$).}
+\label{fig:prob83_n100000_full_mod_hprop_k8_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+
+% =========================================================
+% k = 12
+% =========================================================
+\subsubsection*{\textbf{Full FD (component-wise $h$), $k=12$}}
+
+% ---------- n = 2 ----------
+\subsubsection*{\textbf{Case} $n=2$}
+\IfFileExists{tables_mod/Prob83_n2_fullfd_hprop_k12_mod.tex}{
+\input{tables_mod/Prob83_n2_fullfd_hprop_k12_mod}
+
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\setlength{\fboxsep}{0pt}
+\setlength{\fboxrule}{0.6pt}
+
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob83_n2_full_fd_h_prop_kG12_kH6_k12_TopView}%
+  }
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+  \centering
+  \fbox{%
+    \includegraphics[width=\dimexpr\linewidth-2\fboxrule-2\fboxsep\relax]{figures_mod/Prob83_n2_full_fd_h_prop_k12_RateOfConv}%
+  }
+\end{minipage}
+
+\caption{(Left) Top view of the objective level sets with the optimization paths from the different starting points; (right) experimental convergence rate for converged runs.}
+\label{fig:prob83_n2_full_mod_hprop_k12}
+\end{figure}
+\FloatBarrier
+}{}
+
+% ---------- n > 2 ----------
+\subsubsection*{\textbf{Case} $n>2$}
+
+\IfFileExists{tables_mod/Prob83_n1000_fullfd_hprop_k12_mod.tex}{
+\input{tables_mod/Prob83_n1000_fullfd_hprop_k12_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob83_n1000_full_fd_h_prop_k12_RateOfConv.png}
+\caption{Problem 83, Modified Newton, full FD (component-wise $h$, $k=12$): experimental convergence rate $p_{exp}$ for converged runs ($n=1000$).}
+\label{fig:prob83_n1000_full_mod_hprop_k12_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_mod/Prob83_n10000_fullfd_hprop_k12_mod.tex}{
+\input{tables_mod/Prob83_n10000_fullfd_hprop_k12_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob83_n10000_full_fd_h_prop_k12_RateOfConv.png}
+\caption{Problem 83, Modified Newton, full FD (component-wise $h$, $k=12$): experimental convergence rate $p_{exp}$ for converged runs ($n=10000$).}
+\label{fig:prob83_n10000_full_mod_hprop_k12_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+\IfFileExists{tables_mod/Prob83_n100000_fullfd_hprop_k12_mod.tex}{
+\input{tables_mod/Prob83_n100000_fullfd_hprop_k12_mod}
+\FloatBarrier
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figures_mod/Prob83_n100000_full_fd_h_prop_k12_RateOfConv.png}
+\caption{Problem 83, Modified Newton, full FD (component-wise $h$, $k=12$): experimental convergence rate $p_{exp}$ for converged runs ($n=100000$).}
+\label{fig:prob83_n100000_full_mod_hprop_k12_rate}
+\end{figure}
+\FloatBarrier
+}{}
+
+
+\newpage
+\section{Analysis of the results}
+
+
+
+% Bibliography page
+\newpage
+\printbibliography[heading=bibintoc, title={References}]
+
+\end{document}

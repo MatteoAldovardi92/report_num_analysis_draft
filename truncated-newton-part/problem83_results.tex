@@ -1,0 +1,40 @@
+The objective function for Problem 83, formulated as a nonlinear least-squares problem, is given by:
+$$ F(x) = \frac{1}{2} \sum_{k=1}^{n} f_k(x)^2 $$
+where the residual functions $f_k(x)$ are defined as:
+$$ f_k(x) = 2x_k + h^2(x_k + \sin(x_k)) - x_{k-1} - x_{k+1} $$
+with the constant $h = 1/(n+1)$. The function is subject to the following boundary conditions:
+$$ x_0 = 0 \quad \text{and} \quad x_{n+1} = 1 $$
+The standard starting point for optimization algorithms is $x_i = 1$ for all $i=1, \dots, n$.
+
+\subsubsection*{Gradient of the Objective Function}
+
+The gradient of the objective function is found using the chain rule, simplified by the $\frac{1}{2}$ factor in the objective function:
+$$ \frac{\partial F}{\partial x_j} = \sum_{k=1}^{n} f_k(x) \frac{\partial f_k}{\partial x_j} $$
+The partial derivative of the residual function $f_k(x)$ with respect to $x_j$ can be expressed compactly using the Kronecker delta, $\delta_{ij}$:
+$$ \frac{\partial f_k}{\partial x_j} = (2 + h^2 + h^2\cos(x_k))\delta_{kj} - \delta_{k,j+1} - \delta_{k,j-1} $$
+By defining $f_0 = 0$ and $f_{n+1} = 0$ to handle the boundaries, substituting this into the gradient expression and simplifying the sum yields a single general formula for the gradient components:
+$$ \frac{\partial F}{\partial x_j} = f_j(x) (2 + h^2 + h^2\cos(x_j)) - f_{j+1}(x) - f_{j-1}(x) $$
+This single expression is valid for all $j=1, \dots, n$.
+
+\subsubsection*{Hessian of the Objective Function}
+
+For second-order optimization methods, the Hessian of $F(x) = \frac{1}{2}\mathbf{f}(x)^T \mathbf{f}(x)$ is given by:
+$$ \nabla^2 F(x) = J(x)^T J(x) + \sum_{k=1}^{n} f_k(x) \nabla^2 f_k(x) $$
+where $J(x)$ is the Jacobian matrix of the vector of residuals $\mathbf{f}(x)$.
+
+The Jacobian matrix, $J(x)$, is symmetric and tridiagonal:
+$$ J(x) = \begin{pmatrix}
+\alpha_1 & -1 & 0 & \dots \\
+-1 & \alpha_2 & -1 & \dots \\
+0 & -1 & \ddots & \dots \\
+\vdots & \ddots & \ddots & -1 \\
+0 & \dots & -1 & \alpha_n
+\end{pmatrix} $$
+where $\alpha_k = 2 + h^2 + h^2\cos(x_k)$.
+
+The second term in the Hessian expression involves the Hessians of the individual residual functions, $\nabla^2 f_k(x)$. The only non-zero second partial derivative of $f_k(x)$ is:
+$$ \frac{\partial^2 f_k}{\partial x_k^2} = -h^2\sin(x_k) $$
+This simplifies the summation term to a diagonal matrix:
+$$ \sum_{k=1}^{n} f_k(x) \nabla^2 f_k(x) = \text{diag}(-h^2 f_1(x)\sin(x_1), \dots, -h^2 f_n(x)\sin(x_n)) $$
+Combining the terms, the full Hessian of the objective function is:
+$$ \nabla^2 F(x) = J(x)^T J(x) - h^2 \cdot \text{diag}(f_1(x)\sin(x_1), \dots, f_n(x)\sin(x_n)) $$

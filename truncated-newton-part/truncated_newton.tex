@@ -1,0 +1,41 @@
+This implementation follows the Inexact Newton framework \cite{nocedal2006numerical}. At each iteration $k$, the search direction $p_k$ is computed by approximately solving the Newton system $B_k p = -\nabla f(x_k)$ via Preconditioned Conjugate Gradient (PCG), truncated to handle non-convexity or achieve efficient convergence.
+
+\subsection*{Algorithm Outline}
+\begin{enumerate}
+    \item \textbf{Forcing Term ($\eta_k$):} Determines the relative tolerance for the inner solver.
+    \begin{itemize}
+        \item $k=1$: $\eta_k = 0.5$.
+        \item $k > 1$: \textbf{Superlinear:} $\min(0.5, \sqrt{\|\nabla f(x_{k-1})\|})$ or \textbf{Quadratic:} $\min(0.5, \|\nabla f(x_{k-1})\|)$.
+    \end{itemize}
+
+    \item \textbf{Preconditioning:} Supports $M = \text{diag}(B_k)$ or Modified Cholesky via \texttt{ichol} with diagonal shifting to ensure $M \succ 0$. The system $M y_j = r_j$ is solved at each inner step.
+
+    \item \textbf{Inner Solver: Truncated PCG Updates:}
+    The system $B_k p = -\nabla f(x_k)$ is solved starting with $z_0 = 0, r_0 = \nabla f(x_k)$. At each inner iteration $j$:
+    
+    
+    
+    \begin{itemize}
+        \item \textbf{Curvature Check:} Compute $\kappa_j = d_j^T B_k d_j$.
+        \begin{itemize}
+            \item If $\kappa_j \le 0$ and $j=1$: Return $p_k = -\nabla f(x_k)$ (Steepest Descent).
+            \item If $\kappa_j \le 0$ and $j > 1$: Truncate and return $p_k = z_j$.
+        \end{itemize}
+        \item \textbf{Iterative Updates:}
+        \[ \alpha_j = \frac{r_j^T y_j}{\kappa_j}, \quad z_{j+1} = z_j + \alpha_j d_j, \quad r_{j+1} = r_j + \alpha_j B_k d_j \]
+        \item \textbf{Conjugate Update:} With $y_{j+1} = M^{-1} r_{j+1}$ and $\beta_j = \frac{r_{j+1}^T y_{j+1}}{r_j^T y_j}$:
+        \[ d_{j+1} = -y_{j+1} + \beta_j d_j \]
+        \item \textbf{Truncation:} Stop when $\|r_j\| \le \eta_k \|\nabla f(x_k)\|$ or $j = \text{maxit}$.
+    \end{itemize}
+
+    \item \textbf{Descent Safeguard:} If $\nabla f(x_k)^T p_k \ge 0$ or $p_k$ contains NaNs, set $p_k = -\nabla f(x_k)$.
+
+    \item \textbf{Line Search:} A backtracking approach finds $\alpha_k$ satisfying the Armijo condition:
+    \[ f(x_k + \alpha_k p_k) \le f(x_k) + c_1 \alpha_k \nabla f(x_k)^T p_k \]
+    with the usual break condition if line search fails.
+    
+    \item \textbf{Update:} $x_{k+1} = x_k + \alpha_k p_k$ until $\|\nabla f(x_k)\| < \text{tol}$.
+\end{enumerate}
+
+\subsection*{Remarks}
+The code utilizes pre-allocation for the \texttt{history} struct to record function values, gradient norms, and CG iteration counts. Robustness is ensured via \texttt{condest(Bk)} monitoring and a fallback mechanism to steepest descent during line search failures or negative curvature detections.

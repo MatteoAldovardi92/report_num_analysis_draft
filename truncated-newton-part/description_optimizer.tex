@@ -1,0 +1,34 @@
+\subsection{Algorithm Implementation: Truncated Newton with Backtracking}
+
+The implemented function, \texttt{truncated\_newton\_bctrck}, minimizes a non-linear objective function using a Newton-CG (Truncated Newton) approach. The algorithm iterates until the gradient norm falls below a specified tolerance or the maximum iteration count is reached.
+
+\subsubsection{Outer Iteration and Forcing Terms}
+At each iteration $k$, the algorithm determines a search direction $p_k$ by approximately solving the Newton system $B_k p_k = -g_k$, where $B_k = \nabla^2 f(x_k)$ and $g_k = \nabla f(x_k)$. The accuracy of this approximate solution is controlled by the forcing sequence $\eta_k$, such that the residual satisfies $\|r_k\| \leq \eta_k \|g_k\|$.
+
+The code implements adaptive logic for $\eta_k$ based on the \texttt{forcing\_type} parameter:
+\begin{itemize}
+    \item \textbf{Superlinear:} $\eta_k = \min(0.5, \sqrt{\|g_{k-1}\|})$.
+    \item \textbf{Quadratic:} $\eta_k = \min(0.5, \|g_{k-1}\|)$.
+    \item \textbf{Constant:} Defaults to $\eta_k = 0.5$.
+\end{itemize}
+
+\subsubsection{Inner Solver: Preconditioned Conjugate Gradient (PCG)}
+The inner loop, defined in \texttt{truncated\_pcg}, solves for $p_k$. It includes a safety mechanism for non-convex problems: if negative curvature is detected ($d^T B_k d \leq 0$), the PCG terminates immediately. If the direction generated is not a descent direction or contains \texttt{NaN} values, the algorithm falls back to the steepest descent direction $p_k = -g_k$.
+
+\subsubsection{Preconditioning Strategy}
+The solver supports two preconditioning types to accelerate convergence:
+\begin{enumerate}
+    \item \textbf{Diagonal:} A standard Jacobi preconditioner using $M = \text{diag}(B_k)$, with a safeguard to ensure elements are at least $10^{-3}$.
+    \item \textbf{Modified Cholesky:} An implementation of Algorithm 7.3 (Nocedal \& Wright \cite{nocedal2006numerical}). It attempts to compute an incomplete Cholesky factorization of a shifted Hessian matrix:
+    \[
+    B_{bar} + \alpha I = L L^T
+    \]
+    The algorithm computes a scaling matrix $T = \text{diag}(\|B e_i\|)$ and iteratively increases the shift parameter $\alpha$ until the factorization succeeds. This guarantees the preconditioner is positive definite, even if the Hessian $B_k$ is indefinite.
+\end{enumerate}
+
+\subsubsection{Line Search}
+Once the direction $p_k$ is determined, an Armijo backtracking line search is performed to find a step size $\alpha$. The step is accepted when the sufficient decrease condition is met:
+\[
+f(x_k + \alpha p_k) \leq f(x_k) + c_1 \alpha g_k^T p_k
+\]
+The function logs the full history of function values, gradient norms, CG iterations, and backtracking steps for performance analysis.
